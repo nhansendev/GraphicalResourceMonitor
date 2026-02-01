@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <script src="https://unpkg.com/uplot/dist/uPlot.iife.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/uplot/dist/uPlot.min.css">
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background:#1e1e1e; color:#ccc; font-family:sans-serif; position: relative; }
+    #chart { position: absolute; top: 0; left: -3px; width: 100%; height: 100%; }
+    #settingsButton { position: absolute; top: 10px; right: 10px; background: #333; color: #ccc; border: 1px solid #555; padding: 2px 3px; cursor: pointer; z-index: 10; }
+    #settingsButton:hover { background: #555; }
+  </style>
+</head>
+<body>
+  <button id="settingsButton">⚙️</button>
+  <div id="chart"></div>
+
+  <script>
+    // Required for sending back messages (e.g. "ready")
+    const vscode = acquireVsCodeApi();
+
+    // Defaults
+    let maxHistory = 180;
+    let refreshRate = 1;
+
+    let uplot;
+    let buffer = [];
+
+    // Input validation
+    const safeNum = (v) => typeof v === 'number' ? v : null;
+
+    // Plot colors
+    const colors=['#ff4d4d','#4da6ff','#33cc33','#ffff00'];
+
+    // For resizing dynamically
+    function updatePlotSize() {
+      if (uplot) {
+        uplot.setSize({
+          width: window.innerWidth  - 20,
+          height: window.innerHeight
+        });
+      }
+    }
+
+    // Called when config changes, or data is added
+    function updatePlotData(){
+      if (uplot) {
+        const x = buffer.map(p => p.x);
+        const cpu = buffer.map(p => safeNum(p.cpu));
+        const mem = buffer.map(p => safeNum(p.mem));
+        const gpu = buffer.map(p => safeNum(p.gpu));
+        const gpuMem = buffer.map(p => safeNum(p.gpuMem));
+        const data = [x, cpu, mem, gpu, gpuMem];
+        uplot.setData(data);
+        uplot.redraw();
+      }
+    }
+
+    // Currently no option to update in-place, so remake to change formatting
+    function remakeSeries(show){
+      uplot.batch(() => {
+        for(let i=1;i<=4;i++){
+          uplot.delSeries(i);
+          uplot.addSeries({ stroke:colors[i-1], width:1, points:{show:show, size:3} }, i);
+        }
+      });
+    }
+
+    // If passed a config change, then handle plot and data updates
+    function handleConfigUpdate(event){
+        if (event.data.config) {
+          const newHistory = e.data.config.historySeconds;
+          const newRefresh = e.data.config.refreshRate;
+          const newMarkerToggle = e.data.config.showMarkers;
+
+          if (newHistory && newHistory !== maxHistory) {
+            maxHistory = newHistory;
+            // Trim buffer to new history limit
+            buffer = buffer.filter(sample => sample.x >= (-maxHistory-0.01));
+            // Update plot with latest buffer data
+            updatePlotData();
+          }
+
+          if (newRefresh) refreshRate = newRefresh;
+
+          // Update series to reflect new format
+          remakeSeries(newMarkerToggle);
+        }
+    }
+
+    window.addEventListener('resize', updatePlotSize);
+
+    // Show the settings tab when the gear button is clicked
+    document.getElementById('settingsButton').addEventListener('click', () => {
+      vscode.postMessage({ command: 'openSettings' });
+    });
+
+
+    // Add a series for each color
+    let series = [{}]; 
+    for (let i = 0; i < colors.length; i++) {
+        series.push({
+        stroke: colors[i],
+        width: 1,
+        points: { show: false, size: 3 }
+        });
+    }
+
+    // Initialize plot with placeholder data
+    const emptyData = [[], [], [], [], []];
+    uplot = new uPlot({
+      width: window.innerWidth,
+      height: window.innerHeight,
+      legend: {show:false},
+      scales: { x:{time:false,
+                range: () => [-maxHistory, 0], // a function to allow resizing later
+                space: 30
+                },
+                y:{range:[0,100]} },
+      axes: [
+        { stroke:'#aaa', 
+         grid:{stroke:'#444',width:1}, 
+         values: (u, vals) => {
+            return vals.map(v => {
+                const roundedSec = Math.floor(Math.abs(v) / 5) * 5; // round X ticks to nearest 5 seconds
+                const min = Math.floor(roundedSec / 60);
+                const sec = roundedSec % 60;
+                return '-' + String(min).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+                });
+            }
+          },
+        { stroke:'#aaa', grid:{stroke:'#444',width:1}, values:(u,vals)=>vals.map(v=>v+'%') } // format Y axis as pct
+      ],
+      series: series,
+      cursor: { // no direct interaction with the plot via cursor
+        show: false,
+        lock: false,
+        focus: { prox: 0 }
+      },
+      hooks: {
+        setCursor: [],
+        draw:[ // draw the current pct as text for each metric
+          u=>{
+            const ctx=u.ctx;
+            ctx.save();
+            ctx.font='12px sans-serif';
+            ctx.textAlign='left';
+            ctx.textBaseline='top';
+            const lastIdx=u.data[0].length-1;
+            if(lastIdx<0) return;
+
+            const labels=['CPU', 'RAM', 'GPU', 'VRAM'];
+            for(let i=1;i<=4;i++){
+              const val=u.data[i][lastIdx];
+              if(val==null || typeof val !== 'number') continue;
+              const x=37;
+              const y=14*i;
+              ctx.fillStyle=colors[i-1];
+              ctx.fillText(labels[i-1] + ': ' + val.toFixed(1)+'%', x+5, y);
+            }
+            ctx.restore();
+          }
+        ]
+      }
+    }, emptyData, document.getElementById('chart'));
+
+    // Ready to receive data
+    vscode.postMessage({ command: 'ready' });
+
+    window.addEventListener('message', e => {
+      try {
+        handleConfigUpdate(e);
+
+        const s = e.data.data;
+        if (!s) return;
+
+        // Update time offsets for all samples
+        buffer.forEach(p => { p.x -= refreshRate; });
+
+        // We receive an array when the monitor window is minimized or otherwise hidden
+        // then made visible again (data is buffered in the meantime)
+        if (Array.isArray(s)) {
+          // Full history: set buffer to the array, adjust x to offsets
+          buffer = s.map(sample => ({
+            x: (sample.x - Date.now()) / 1000, // convert to seconds offset
+            cpu: safeNum(sample.cpu),
+            mem: safeNum(sample.mem),
+            gpu: safeNum(sample.gpu),
+            gpuMem: safeNum(sample.gpuMem)
+          }));
+        } else {
+          // Single sample: adjust x to offset and add to buffer
+          s.x = (s.x - Date.now()) / 1000;
+          s.cpu = safeNum(s.cpu);
+          s.mem = safeNum(s.mem);
+          s.gpu = safeNum(s.gpu);
+          s.gpuMem = safeNum(s.gpuMem);
+          buffer.push(s);
+        }        
+        
+        // Discard datapoints past the valid history timeframe
+        buffer = buffer.filter(sample => sample.x >= -maxHistory-0.01);
+
+        updatePlotData();
+      } catch (error) {
+        console.error('Error in message handler:', error);
+      }
+    });
+  </script>
+</body>
+</html>

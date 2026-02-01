@@ -1,0 +1,72 @@
+{
+  "name": "graphicalresourcemonitor",
+  "displayName": "GraphicalResourceMonitor",
+  "description": "A simple graphical monitor for tracking CPU/Memory/GPU usage",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.108.1"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "id": "graphicalResourceMonitor",
+          "name": "Resource Monitor",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Graphical Resource Monitor",
+      "properties": {
+        "sysmon.refreshRate": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0.5,
+          "description": "Sampling interval (s)"
+        },
+        "sysmon.historySeconds": {
+          "type": "number",
+          "default": 180,
+          "minimum": 30,
+          "maximum": 300,
+          "description": "Max history length (seconds) for the chart"
+        },
+        "sysmon.showMarkers": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show data point markers on the chart"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "postcompile": "node -e \"require('fs').copyFileSync('src/webview.html', 'out/webview.html')\"",
+    "bundle": "npx esbuild ./out/extension.js --bundle --platform=node --outfile=out/extension.bundle.js --external:vscode && move out\\extension.bundle.js out\\extension.js",
+    "package": "npm run compile && npm run bundle && npx vsce package",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@types/vscode": "^1.108.1",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2",
+    "esbuild": "^0.27.2",
+    "eslint": "^9.39.2",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.52.0"
+  },
+  "dependencies": {
+    "systeminformation": "^5.30.7"
+  }
+}
