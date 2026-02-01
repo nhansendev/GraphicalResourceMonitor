@@ -9,6 +9,7 @@
 - Dynamically resizable
 - Configurable for different time-frames, sample rates, and plot formatting
 
+**Note:** Only tested on Windows 10, with an Nvidia GPU. Reduced functionality for other OS/GPU types is likely until support is explicitly added.
 
 ### Configuration Options
 Click the gear icon in the top-right of the monitor window, or search for "sysmon" in the settings:
