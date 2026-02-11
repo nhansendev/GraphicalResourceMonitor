@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
-import { sampleCpuMem } from './monitor';
-import { hasNvidiaGpu, sampleNvidiaGpu } from './gpu';
-import { getHtml } from './html';
+import { sampleCpuMem } from './webview/monitor';
+import { hasNvidiaGpu, sampleNvidiaGpu } from './webview/gpu';
+import { getHtml } from './webview/html';
 
 function safeNum(v: any) {
   return Number.isFinite(v) ? v : null;
@@ -22,23 +22,28 @@ class ResourceMonitorProvider implements vscode.WebviewViewProvider {
   private timer?: NodeJS.Timeout;
   private samples: Sample[] = [];
   private maxHistorySeconds: number = 180;
+  private smoothRate: number = 1;
   private pollingStarted: boolean = false;
+  private ctx: vscode.ExtensionContext;
 
   // Remove async call from constructor
-  constructor() {}
+  constructor(ctx: vscode.ExtensionContext) {
+    this.ctx = ctx;
+  }
 
   async initialize() {
     this.hasGpu = await hasNvidiaGpu();
     const config = vscode.workspace.getConfiguration('sysmon');
     this.refreshRate = config.get<number>('refreshRate', 1);
     this.maxHistorySeconds = config.get<number>('historySeconds', 180);
+    this.smoothRate = config.get<number>('smoothRate', 1);
     // Do not start polling here; wait for webview ready
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView) {
     this.webviewView = webviewView;
     webviewView.webview.options = { enableScripts: true };
-    webviewView.webview.html = getHtml();
+    webviewView.webview.html = getHtml(webviewView.webview, this.ctx.extensionUri);
     // Listen for messages from webview
     webviewView.webview.onDidReceiveMessage(message => {
       // vscode.window.showInformationMessage(message.command);
@@ -70,7 +75,8 @@ class ResourceMonitorProvider implements vscode.WebviewViewProvider {
       config: {
         historySeconds: config.get<number>('historySeconds', 180),
         refreshRate: this.refreshRate,
-        showMarkers: config.get<boolean>('showMarkers', false)
+        showMarkers: config.get<boolean>('showMarkers', false),
+        smoothRate: config.get<number>('smoothRate', 1),
       }
     });
   }
@@ -116,7 +122,7 @@ class ResourceMonitorProvider implements vscode.WebviewViewProvider {
 }
 
 export async function activate(ctx: vscode.ExtensionContext) {
-  const provider = new ResourceMonitorProvider();
+  const provider = new ResourceMonitorProvider(ctx);
   await provider.initialize(); // Await initialization here
   ctx.subscriptions.push(vscode.window.registerWebviewViewProvider('graphicalResourceMonitor', provider));
 
@@ -127,8 +133,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
       provider.stopPolling();
       provider.startPolling();
       provider.postConfig();
-    }
-    if (event.affectsConfiguration('sysmon.historySeconds') || event.affectsConfiguration('sysmon.showMarkers')) {
+    }else if (event.affectsConfiguration('sysmon')) {
       provider.postConfig(); // Send updated config to webview
     }
   });

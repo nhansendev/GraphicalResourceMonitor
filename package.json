@@ -3,6 +3,10 @@
   "displayName": "GraphicalResourceMonitor",
   "description": "A simple graphical monitor for tracking CPU/Memory/GPU usage",
   "version": "0.0.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nhansendev/GraphicalResourceMonitor"
+  },
   "engines": {
     "vscode": "^1.108.1"
   },
@@ -39,6 +43,13 @@
           "maximum": 300,
           "description": "Max history length (seconds) for the chart"
         },
+        "sysmon.smoothRate": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0.001,
+          "maximum": 1,
+          "description": "Smaller values apply greater smoothing. Set to 1 to disable"
+        },
         "sysmon.showMarkers": {
           "type": "boolean",
           "default": false,
@@ -49,7 +60,7 @@
   },
   "scripts": {
     "compile": "tsc -p ./",
-    "postcompile": "node -e \"require('fs').copyFileSync('src/webview.html', 'out/webview.html')\"",
+    "postcompile": "node scripts/copy-webview.js",
     "bundle": "npx esbuild ./out/extension.js --bundle --platform=node --outfile=out/extension.bundle.js --external:vscode && move out\\extension.bundle.js out\\extension.js",
     "package": "npm run compile && npm run bundle && npx vsce package",
     "watch": "tsc -watch -p ./"

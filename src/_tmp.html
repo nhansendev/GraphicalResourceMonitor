@@ -22,6 +22,7 @@
     // Defaults
     let maxHistory = 180;
     let refreshRate = 1;
+    let smoothRate = 1;
 
     let uplot;
     let buffer = [];
@@ -40,6 +41,47 @@
           height: window.innerHeight
         });
       }
+    }
+
+    // Store EMA values for each metric
+    let emaValues = { cpu: null, mem: null, gpu: null, gpuMem: null };
+
+    // Called when smoothRate changes - reset EMA values for fresh calculation
+    function resetEMA() {
+      emaValues = { cpu: null, mem: null, gpu: null, gpuMem: null };
+    }
+
+    function applyEMA(metricName, currentValue) {
+      if (currentValue === null) return null;
+      
+      // If smoothRate is 1, disable smoothing entirely
+      if (smoothRate === 1) {
+        emaValues[metricName] = currentValue;
+        return currentValue;
+      }
+      
+      if (emaValues[metricName] === null) {
+        // Initialize with first value
+        emaValues[metricName] = currentValue;
+        return currentValue;
+      }
+      
+      const previousEMA = emaValues[metricName];
+      const newEMA = (currentValue * smoothRate) + (previousEMA * (1 - smoothRate));
+      emaValues[metricName] = newEMA;
+      
+      return newEMA;
+    }
+
+    // Apply EMA to all metrics in a sample
+    function smoothSample(sample) {
+      return {
+        x: sample.x,
+        cpu: applyEMA('cpu', sample.cpu),
+        mem: applyEMA('mem', sample.mem),
+        gpu: applyEMA('gpu', sample.gpu),
+        gpuMem: applyEMA('gpuMem', sample.gpuMem)
+      };
     }
 
     // Called when config changes, or data is added
@@ -69,9 +111,10 @@
     // If passed a config change, then handle plot and data updates
     function handleConfigUpdate(event){
         if (event.data.config) {
-          const newHistory = e.data.config.historySeconds;
-          const newRefresh = e.data.config.refreshRate;
-          const newMarkerToggle = e.data.config.showMarkers;
+          const newHistory = event.data.config.historySeconds;
+          const newRefresh = event.data.config.refreshRate;
+          const newMarkerToggle = event.data.config.showMarkers;
+          const newSmooth = event.data.config.smoothRate;
 
           if (newHistory && newHistory !== maxHistory) {
             maxHistory = newHistory;
@@ -82,6 +125,10 @@
           }
 
           if (newRefresh) refreshRate = newRefresh;
+          if (newSmooth) {
+            smoothRate = newSmooth;
+            resetEMA(); // Reset EMA values for new smoothing rate
+          }
 
           // Update series to reflect new format
           remakeSeries(newMarkerToggle);
@@ -188,14 +235,21 @@
             gpu: safeNum(sample.gpu),
             gpuMem: safeNum(sample.gpuMem)
           }));
+          
+          // Apply EMA smoothing to the entire array
+          buffer = buffer.map(sample => smoothSample(sample));
         } else {
           // Single sample: adjust x to offset and add to buffer
-          s.x = (s.x - Date.now()) / 1000;
-          s.cpu = safeNum(s.cpu);
-          s.mem = safeNum(s.mem);
-          s.gpu = safeNum(s.gpu);
-          s.gpuMem = safeNum(s.gpuMem);
-          buffer.push(s);
+          const sample = {
+            x: (s.x - Date.now()) / 1000,
+            cpu: safeNum(s.cpu),
+            mem: safeNum(s.mem),
+            gpu: safeNum(s.gpu),
+            gpuMem: safeNum(s.gpuMem)
+          };
+          
+          // Apply EMA smoothing before adding to buffer
+          buffer.push(smoothSample(sample));
         }        
         
         // Discard datapoints past the valid history timeframe
